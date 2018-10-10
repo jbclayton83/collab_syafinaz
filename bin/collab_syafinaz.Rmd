@@ -1,0 +1,168 @@
+---
+title: "Probioitics Skeleton"
+author: "Suzie Hoops"
+date: "10/01/2018"
+output: html_document
+---
+
+```{r setup, include = FALSE, message = FALSE}
+# GENERAL SET-UP
+
+# Setting up the document
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load necessary packages
+require(knitr)
+require(vegan)
+require(tidyverse)
+require(phyloseq)
+#note: had to install phyloseq from source using source("https://raw.githubusercontent.com/joey711/phyloseq/master/inst/scripts/installer.R")
+require(ggplot2)
+
+# Note: if you change to PDF or Word document, may want to specify resolution/format (example below)
+# set root directory to Dropbox folder
+opts_knit$set(root.dir = gsub("/bin", "", getwd()))
+# formatting chunks - not recommended unless creating pngs and pdfs
+#opts_chunk$set(echo = TRUE, fig.path = "Figs/", dev = c("png", "pdf"), dpi = 300)
+```
+
+## Loading & Cleaning Data
+
+We have already run the raw data through shi7 and BURST, so now we want to clean up these OTU tables for alpha and beta diversity analyses.
+
+```{r load data, include = FALSE, message = FALSE}
+# LOAD DATA
+getwd()
+# Load raw taxa file (from BURST)
+tax <- read.delim("data/r/syafinaz_gg97_taxatable.txt", row = 1, stringsAsFactors = FALSE)
+
+# Load raw otu file
+# CARTER : write something to bring in otufile
+# line1 <- readLines(otufile, n=1) # skip first line if necessary
+# if (line1=="# Constructed from biom file") {
+#   otu <- read.table("data/r/syafinaz_gg97_otutable.txt", sep='\t', head=T, row=1, comment='', quote="",skip=1)
+# }
+# else { otu <- read.table(tax, sep='\t', head=T, row=1, comment='', quote="") }
+# KEGG <- NULL # store last column of otu file if descriptions
+# if (colnames(otu)[ncol(otu)] == "KEGG_Pathways") {
+#   KEGG <- setNames(otu[,ncol(otu)], rownames(otu)) #set names of rows to descriptions
+#   otu <- otu[,-ncol(otu)] # remove last column
+# }
+
+# Load mapfile for metadata
+map <- read.table("data/r/sya_collab_mastermap.txt", sep = "\t", head = TRUE, row = 1, comment = "")
+
+# Load tree file from GreenGenes
+tree <- read_tree_greengenes("data/r/gg97.tre")
+```
+
+Here we get to cleaning the data in preparation for diversity analyses. The loading data was already done, here we need to fill in code for tampering with the data.
+
+```{r clean data}
+# FILTER TAXA & OTU DATA
+
+########## Taxa Clean-up ##########
+
+# fix sample names - remove spaces, etc. if necessary
+
+# drop last column with taxonomy info.
+tax_info <- tax$taxonomy
+tax <- tax[,colnames(tax) != "taxonomy"]  
+#picrust otu files have extra col "KEGG_Pathways" that should be removed as well, use the names as row names if they aren't already present
+
+# check column sums for total sample reads
+check <- as.data.frame(sort(colSums(tax)))
+check #view check output looks like only two samples have fewer than 500
+
+# drop samples with low read counts
+tax <- tax[,colSums(tax) > 500] #500 seems like a good threshold for the taxatable
+
+# drop taxa with zero counts
+tax <- tax[rowSums(tax) > 0,]
+
+# look for non-bacterial hits, store them separately
+tax_non_bact <- tax[-grep("k__Bacteria", rownames(tax)),]
+
+# get taxa at species level, appending NA's for unknowns (tax_s is taxatable at species level)
+tax_s <- rowsum(tax,rownames(tax))
+rownames(tax_s) = sapply(strsplit(rownames(tax_s),";"),function(x) paste(x[1:7],collapse=";"))
+
+# normalize for relative abundance of taxa per sample (colSums should be 100% - 1.0)
+tax_norm <- sweep(tax_s, 2, colSums(tax_s), "/") #sweep by columns(2), dividing to get relative abund.("/")
+
+# drop low abundance
+## this removes 475 taxa, leaving 117 taxa of relatively high abundance
+tax_norm_dla <- tax_norm[rowMeans(tax_norm) >= 0.0001,]  #removes taxa with an avg. abundance less than .01%
+tax_s <- tax_s[rownames(tax_s) %in% rownames(tax_norm_dla),]   #reduce tax_s file to just these species
+
+# normalize again after removal
+tax_norm_s <- sweep(tax_s, 2, colSums(tax_s), "/")
+
+# store all sample names for later
+sample_names <- colnames(tax)
+
+# create clr version - make sure it is converted to integer
+tax_clr_s <- tax_s*1.0
+
+# transpose for imputation
+transp_s <- t(tax_clr_s)
+
+# imputation steps - CLR transformation (we will get to this later)
+
+########## OTU Clean-up ##########
+
+# CARTER : Complete the above steps for the otu table. Look at the otu table to make sure you're capturing the right information. Some steps for taxa may be unnecessary, others may need to be changed in order to get what we want, which is a cleaned otu table, transposed such that the otu's appear as the columns.
+
+```
+
+```{r alpha div}
+# ALPHA DIVERSITY
+
+#######################################
+# Questions here:
+## 1. Do we want to do the alpha diversity based on data from a single time point? by group (time of intervention or normal/overweight)? per sample overall (doesn't seem to make sense)?
+## 2. How should we group samples in the diversity tests/plots?
+## 3. Do we need to include more tests beyond Shannon and Simpson? Which is best for this data?
+#######################################
+
+# Make counts table
+## multiply re-normalized reduced table by a factor to remove decimals and round
+med_depth <- median(colSums(tax_s)) # using median as factor
+tax_counts_s <- round(sweep(tax_norm_s, 2, colSums(tax_norm_s), "/") * med_depth) #rarefied, transposed, normalized
+
+# Make sure map and taxa table use same sample id's
+## mapping file uses sampleid.0 for all samples, whereas tax_counts_s uses sampleid.week (i.e. A013.5)
+
+# Shannon Diversity
+## We typically use shannon diversity measurements, accounting for the richness and evenness of the samples.
+## diversity(index = "shannon") from vegan package
+div_shannon <- diversity(tax_counts_s, "shannon")
+
+# Simpson Diversity
+## We can also try Simpson measurement, compare to Shannon to see which is more suited to the data.
+## diversity(index = "simpson") from vegan package ---- OR DO WE WANT "invsimpson"????? ----
+div_invsimps <- diversity(tax_counts_s, "invsimpson")
+
+# Plotting
+
+```
+
+```{r beta div}
+# BETA DIVERSITY / PCoA
+
+# Bray-Curtis
+## get a distance matrix, method 1
+bray <- vegdist() #expects transposed counts table
+
+# Weighted UniFrac
+## get a distance matrix, method 2
+## create phyloseq object combining otu abundance and phylogenetic tree
+phyobj <- phyloseq() #expects counts table and tree
+UniFrac(phyobj, weighted = TRUE, normalized = TRUE)
+
+# Unweighted UniFrac
+## get a distance matrix, method 3
+UniFrac(phyobj, weighted = FALSE)
+
+# Principal Coordinate Analysis Plots
+```
