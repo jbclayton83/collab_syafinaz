@@ -1,6 +1,6 @@
 ---
 title: "Probioitics Skeleton"
-author: "Suzie Hoops"
+author: "Suzie Hoops & Carter Linhardt"
 date: "10/01/2018"
 output: html_document
 ---
@@ -11,7 +11,7 @@ output: html_document
 # Setting up the document
 knitr::opts_chunk$set(echo = TRUE)
 
-# Load necessary packages
+# Load necessary packages (if you need to install use install.packages())
 require(knitr)
 require(vegan)
 require(tidyverse)
@@ -22,13 +22,11 @@ require(ggplot2)
 # Note: if you change to PDF or Word document, may want to specify resolution/format (example below)
 # set root directory to Dropbox folder
 opts_knit$set(root.dir = gsub("/bin", "", getwd()))
-# formatting chunks - not recommended unless creating pngs and pdfs
+# formatting chunks - not recommended unless creating pngs and pdfs (we will add this later)
 #opts_chunk$set(echo = TRUE, fig.path = "Figs/", dev = c("png", "pdf"), dpi = 300)
 ```
 
 ## Loading & Cleaning Data
-
-We have already run the raw data through shi7 and BURST, so now we want to clean up these OTU tables for alpha and beta diversity analyses.
 
 ```{r load data, include = FALSE, message = FALSE}
 # LOAD DATA
@@ -38,37 +36,51 @@ tax <- read.delim("data/r/syafinaz_gg97_taxatable.txt", row = 1, stringsAsFactor
 
 # Load raw otu file
 # CARTER : write something to bring in otufile
-# line1 <- readLines(otufile, n=1) # skip first line if necessary
-# if (line1=="# Constructed from biom file") {
-#   otu <- read.table("data/r/syafinaz_gg97_otutable.txt", sep='\t', head=T, row=1, comment='', quote="",skip=1)
-# }
-# else { otu <- read.table(tax, sep='\t', head=T, row=1, comment='', quote="") }
-# KEGG <- NULL # store last column of otu file if descriptions
-# if (colnames(otu)[ncol(otu)] == "KEGG_Pathways") {
-#   KEGG <- setNames(otu[,ncol(otu)], rownames(otu)) #set names of rows to descriptions
-#   otu <- otu[,-ncol(otu)] # remove last column
-# }
+otu <- read.table("data/r/syafinaz_gg97_otutable.txt", sep='\t', head=T, row=1, comment='', quote="")
+KEGG <- NULL # store last column of otu file if descriptions
+if (colnames(otu)[ncol(otu)] == "KEGG_Pathways") {
+  KEGG <- setNames(otu[,ncol(otu)], rownames(otu)) #set names of rows to descriptions
+  otu <- otu[,-ncol(otu)] # remove last column
+}
 
 # Load mapfile for metadata
-map <- read.table("data/r/sya_collab_mastermap.txt", sep = "\t", head = TRUE, row = 1, comment = "")
+map <- read.table("data/r/mastermap.txt", sep = "\t", head = TRUE, row = 1, comment = "")
+
 
 # Load tree file from GreenGenes
 tree <- read_tree_greengenes("data/r/gg97.tre")
 ```
 
-Here we get to cleaning the data in preparation for diversity analyses. The loading data was already done, here we need to fill in code for tampering with the data.
+### Map File
+
+The map file contains fewer than the expected 160 samples (4 from each of the 40 patients). So, we will need to restrict our analysis to only those samples included in the data. Further down the road we will have to keep in mind some subjects may have incomplete data.
+
+```{r mapfile}
+# MAP FILE CLEAN-UP
+
+########## Mapfile clean-up/check ##########
+subjects <- unique(map$SubjectID)  #unique subject id's
+nsub <- length(subjects)           #number of subjects (40)
+samples <- unique(rownames(map))   #unique sample id's (stored in rownames)
+nsamp <- length(samples)           #number of samples (157)
+```
+
+### Taxa/OTU tables
+
+We have already run the raw data through shi7 and BURST, so now we want to clean up these OTU tables for alpha and beta diversity analyses. Here we get to cleaning the data in preparation for diversity analyses. The loading data was already done, here we need to fill in code for tampering with the data.
 
 ```{r clean data}
 # FILTER TAXA & OTU DATA
 
 ########## Taxa Clean-up ##########
 
-# fix sample names - remove spaces, etc. if necessary
+# restrict to only the samples in our mapfile
+tax <- tax[,colnames(tax) %in% samples]
 
 # drop last column with taxonomy info.
 tax_info <- tax$taxonomy
 tax <- tax[,colnames(tax) != "taxonomy"]  
-#picrust otu files have extra col "KEGG_Pathways" that should be removed as well, use the names as row names if they aren't already present
+#otu files have extra col "KEGG_Pathways" that should be removed as well, use the names as row names if they aren't already present
 
 # check column sums for total sample reads
 check <- as.data.frame(sort(colSums(tax)))
@@ -89,6 +101,7 @@ rownames(tax_s) = sapply(strsplit(rownames(tax_s),";"),function(x) paste(x[1:7],
 
 # normalize for relative abundance of taxa per sample (colSums should be 100% - 1.0)
 tax_norm <- sweep(tax_s, 2, colSums(tax_s), "/") #sweep by columns(2), dividing to get relative abund.("/")
+# check that colsums are 1 after this
 
 # drop low abundance
 ## this removes 475 taxa, leaving 117 taxa of relatively high abundance
@@ -104,16 +117,61 @@ sample_names <- colnames(tax)
 # create clr version - make sure it is converted to integer
 tax_clr_s <- tax_s*1.0
 
-# transpose for imputation
-transp_s <- t(tax_clr_s)
+# transpose for imputation - taxa as columns
+tax_clr_s <- t(tax_clr_s)
 
-# imputation steps - CLR transformation (we will get to this later)
+# CLR transformation (imputation)
+eps <- 0.5 # epsilon value
+tax_clr_s <- tax_clr_s * (1 - rowSums(tax_clr_s==0) * eps / rowSums(tax_clr_s)) #shift values
+tax_clr_s[tax_clr_s == 0] <- eps #assign epsilon value to all zero entries
+ls <- log(tax_clr_s)  #take a logarithm of shifted values
+tax_clr_s <- t(ls - rowMeans(ls)) #difference from mean logarithm
+tax_clr_s <- tax_clr_s[, !is.nan(colSums(tax_clr_s))]
+tax_s <- as.data.frame(tax_clr_s)
+
 
 ########## OTU Clean-up ##########
 
 # CARTER : Complete the above steps for the otu table. Look at the otu table to make sure you're capturing the right information. Some steps for taxa may be unnecessary, others may need to be changed in order to get what we want, which is a cleaned otu table, transposed such that the otu's appear as the columns.
 
+# restrict to only the samples in our mapfile
+otu <- otu[,colnames(otu) %in% samples]   # fewer samples in otu table - why???
+
+# check column sums for total sample reads
+check <- as.data.frame(sort(colSums(otu)))
+check #view check output looks like only two samples have fewer than 500
+
+# drop samples with low read counts
+otu <- otu[,colSums(otu) > 2500] #5 out of 160 fall below 2500
+
+# drop otus with zero counts
+otu <- otu[rowSums(otu) >= 1,]
+
+# normalize for relative abundance of otu per sample (colSums should be 100% - 1.0)
+otu_norm <- sweep(otu, 2, colSums(otu), "/") #sweep by columns(2), dividing to get relative abund.("/")
+# check that colsums are 1 after this:
+#otuNormCheck <-as.data.frame(colSums(otu_norm))
+#nrow(otuNormCheck) == colSums(otuNormCheck)
+
+# drop low abundance
+otu_norm_dla <- otu_norm[rowMeans(otu_norm) >= 0.0001,]  #removes otu with an avg. abundance less than .01%
+otu_a <- otu[rownames(otu) %in% rownames(otu_norm_dla),]   #reduce otu file ???
+
+# normalize again after removal
+otu_norm_a <- sweep(otu_a, 2, colSums(otu_a), "/") 
+
+
+# create clr version - make sure it is converted to integer
+otu_clr_a <- otu_a*1.0
+
+# transpose for imputation
+otu_clr_a <- t(otu_clr_a)
+
+# CLR Transformation (imputation)
+
 ```
+
+## Diversity Analyses
 
 ```{r alpha div}
 # ALPHA DIVERSITY
