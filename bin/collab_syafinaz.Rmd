@@ -44,8 +44,7 @@ if (colnames(otu)[ncol(otu)] == "KEGG_Pathways") {
 }
 
 # Load mapfile for metadata
-map <- read.table("data/r/mastermap.txt", sep = "\t", head = TRUE, row = 1, comment = "")
-
+map <- read.table("data/r/sya_collab_mastermap.txt", sep = "\t", head = TRUE, row = 1, comment = "")
 
 # Load tree file from GreenGenes
 tree <- read_tree_greengenes("data/r/gg97.tre")
@@ -125,7 +124,7 @@ eps <- 0.5 # epsilon value
 tax_clr_s <- tax_clr_s * (1 - rowSums(tax_clr_s==0) * eps / rowSums(tax_clr_s)) #shift values
 tax_clr_s[tax_clr_s == 0] <- eps #assign epsilon value to all zero entries
 ls <- log(tax_clr_s)  #take a logarithm of shifted values
-tax_clr_s <- t(ls - rowMeans(ls)) #difference from mean logarithm
+tax_clr_s <- ls - rowMeans(ls) #difference from mean logarithm
 tax_clr_s <- tax_clr_s[, !is.nan(colSums(tax_clr_s))]
 tax_s <- as.data.frame(tax_clr_s)
 
@@ -139,7 +138,7 @@ otu <- otu[,colnames(otu) %in% samples]   # fewer samples in otu table - why???
 
 # check column sums for total sample reads
 check <- as.data.frame(sort(colSums(otu)))
-check #view check output looks like only two samples have fewer than 500
+#check #view check output looks like only two samples have fewer than 500
 
 # drop samples with low read counts
 otu <- otu[,colSums(otu) > 2500] #5 out of 160 fall below 2500
@@ -178,28 +177,24 @@ otu_clr_a <- t(otu_clr_a)
 
 #######################################
 # Questions here:
-## 1. Do we want to do the alpha diversity based on data from a single time point? by group (time of intervention or normal/overweight)? per sample overall (doesn't seem to make sense)?
+## 1. Do we want to do the alpha diversity based on data from a single time point? by group (time of intervention or normal/overweight)? per sample (including every time point) (doesn't seem to make sense)?
 ## 2. How should we group samples in the diversity tests/plots?
 ## 3. Do we need to include more tests beyond Shannon and Simpson? Which is best for this data?
 #######################################
 
-# Make counts table
+# Make counts table (we typically use only the otu tables here)
 ## multiply re-normalized reduced table by a factor to remove decimals and round
-med_depth <- median(colSums(tax_s)) # using median as factor
-tax_counts_s <- round(sweep(tax_norm_s, 2, colSums(tax_norm_s), "/") * med_depth) #rarefied, transposed, normalized
-
-# Make sure map and taxa table use same sample id's
-## mapping file uses sampleid.0 for all samples, whereas tax_counts_s uses sampleid.week (i.e. A013.5)
 
 # Shannon Diversity
 ## We typically use shannon diversity measurements, accounting for the richness and evenness of the samples.
-## diversity(index = "shannon") from vegan package
-div_shannon <- diversity(tax_counts_s, "shannon")
+## diversity(index = "shannon", MARGIN = ) from vegan package (margin: per sample)
 
 # Simpson Diversity
-## We can also try Simpson measurement, compare to Shannon to see which is more suited to the data.
-## diversity(index = "simpson") from vegan package ---- OR DO WE WANT "invsimpson"????? ----
-div_invsimps <- diversity(tax_counts_s, "invsimpson")
+## We can also try Simpson/InvSimpson measurement, compare to Shannon to see which is more suited to the data.
+## diversity(index = "invsimpson", MARGIN = ) from vegan package (margin: per sample)
+
+# Inverse Simpson Diversity
+## diversity(index = "simpson", MARGIN = ) from vegan package (margin: per sample)
 
 # Plotting
 
